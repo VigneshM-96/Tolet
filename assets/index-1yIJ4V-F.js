@@ -409,15 +409,18 @@ Error generating stack: `+e.message+`
         }
         .search-input-wrap .search-input {
           width: 100%; display: block; position: relative; z-index: 2; background: transparent;
+          padding: 6px 0;
         }
         .typing-placeholder {
-          position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+          position: absolute; left: 0; top: 0; bottom: 0;
           right: 0;
+          display: flex; align-items: center;
           font-size: 15px; font-weight: 500; color: #9ab5c7;
           font-family: 'Inter', sans-serif;
           pointer-events: none; z-index: 1;
           white-space: nowrap;
           overflow: hidden; text-overflow: ellipsis;
+          padding: 6px 0;
         }
         .typing-cursor {
           font-weight: 300; color: #1a8fd1;
