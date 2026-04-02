@@ -398,7 +398,7 @@ Error generating stack: `+e.message+`
         }
         .search-input-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
         .search-input {
-          flex: 1; border: none; outline: none; font-size: 15px; font-weight: 500;
+          border: none; outline: none; font-size: 15px; font-weight: 500;
           color: #0b3a5e; font-family: 'Inter', sans-serif; background: transparent;
         }
         .search-input::placeholder { color: #9ab5c7; }
@@ -408,11 +408,11 @@ Error generating stack: `+e.message+`
           flex: 1; position: relative; min-width: 0; overflow: hidden;
         }
         .search-input-wrap .search-input {
-          width: 100%; position: relative; z-index: 2; background: transparent;
+          width: 100%; display: block; position: relative; z-index: 2; background: transparent;
         }
         .typing-placeholder {
           position: absolute; left: 0; top: 50%; transform: translateY(-50%);
-          width: 100%;
+          right: 0;
           font-size: 15px; font-weight: 500; color: #9ab5c7;
           font-family: 'Inter', sans-serif;
           pointer-events: none; z-index: 1;
@@ -803,6 +803,7 @@ Error generating stack: `+e.message+`
 
           .search-card { border-radius: 14px; padding: 10px 12px; margin-bottom: 20px; }
           .search-input { font-size: 13px; }
+          .typing-placeholder { font-size: 13px; }
           .search-btn { padding: 7px 14px; font-size: 12px; }
           .plus-btn { width: 28px; height: 28px; font-size: 18px; }
 
