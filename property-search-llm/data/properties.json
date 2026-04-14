@@ -1,0 +1,31 @@
+[
+  {
+    "id": 1,
+    "type": "2BHK",
+    "location": "Ambattur",
+    "price": 12000,
+    "nearby": [
+      "Railway station",
+      " Stadium"
+    ],
+    "distance_railway_km": 2.0,
+    "parking": true,
+    "amenities": [
+      "Balcony"
+    ]
+  },
+  {
+    "id": 2,
+    "type": "2BHK",
+    "location": "Avadi",
+    "price": 15000,
+    "nearby": [
+      "Railway Station"
+    ],
+    "distance_railway_km": 2.0,
+    "parking": true,
+    "amenities": [
+      "Balcony"
+    ]
+  }
+]
