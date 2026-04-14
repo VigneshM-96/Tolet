@@ -1,10 +1,24 @@
 import { useState, useEffect, useRef } from "react";
 import NavBar from "../components/NavBar";
+import LoginModal from "../components/LoginModal";
 import cloudsBg from "../assets/mainbg.png";
+import { useNavigate } from "react-router-dom";
+import { auth, db } from "../firebase";
+import { onAuthStateChanged } from "firebase/auth";
+import { collection, addDoc, serverTimestamp } from "firebase/firestore";
 
 const featurePills = [
   "Automated Rent Collection","AI Matched Property","Rent Comparison Chart",
   "Screen Tenants, Landlords","E-Signed Agreement","Rera Agents",
+];
+
+const placeholderPhrases = [
+  "2BHK from KK Nagar",
+  "3BHK near Anna Nagar with parking",
+  "1BHK under ₹15,000 in Velachery",
+  "Pet-friendly flat in T Nagar",
+  "Furnished studio near OMR",
+  "Independent house in Adyar",
 ];
 
 const directOwnerFeatures = [
@@ -25,11 +39,11 @@ const brokerFeatures = [
 
 const landlordFeatures = [
   { title: "AI-powered tenant matching", desc: "Our neural networks analyze tenant preferences to suggest your home to the perfect matches." },
-  { title: "Background Screens for Tenant", desc: "Manage all viewings, messages, and offers from a single high-fidelity interface." },
-  { title: "Automated Rent Collection", desc: "Every lead is pre-vetted through AI identity and financial verification protocols." },
-  { title: "VR Virtual Videos", desc: "Manage all viewings, messages, and offers from a single high-fidelity interface." },
-  { title: "Property Valuation", desc: "Every lead is pre-vetted through AI identity and financial verification protocols." },
-  { title: "Avoid Fake calls", desc: "Manage all viewings, messages, and offers from a single high-fidelity interface." },
+  { title: "Background Screens for Tenant", desc: "Verified identity, employment, and rental history checks to protect your property and peace of mind." },
+  { title: "Automated Rent Collection", desc: "Set-and-forget monthly collection with auto-reminders, receipts, and instant bank transfers." },
+  { title: "VR Virtual Videos", desc: "Immersive 360° walkthroughs let prospective tenants tour your property remotely anytime." },
+  { title: "Property Valuation", desc: "AI-driven market analysis benchmarks your property against 4M+ data points for optimal pricing." },
+  { title: "Avoid Fake calls", desc: "Smart call screening filters out spam and unverified enquiries so only genuine leads reach you." },
 ];
 
 const listingSteps = [
@@ -61,7 +75,6 @@ function FeatureList({ items }) {
             width: "100%",
           }}
         >
-          {/* left: circle + line */}
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0, width: "28px" }}>
             <div style={{
               width: "28px", height: "28px", borderRadius: "50%",
@@ -77,8 +90,6 @@ function FeatureList({ items }) {
               <div style={{ width: "1.5px", flex: 1, minHeight: "16px", background: "#d6e4ed", marginTop: "2px" }} />
             )}
           </div>
-
-          {/* right: text — forced left */}
           <div style={{
             display: "flex", flexDirection: "column", alignItems: "flex-start",
             justifyContent: "flex-start",
@@ -97,7 +108,7 @@ function FeatureList({ items }) {
             </p>
             <p style={{
               margin: 0,
-              fontSize: "12.5px", color: "#9ab5c7",
+              fontSize: "13.5px", color: "#4a6d7f",
               fontFamily: "'Inter', sans-serif",
               textAlign: "left", lineHeight: "1.5",
             }}>
@@ -114,7 +125,123 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [heroVisible, setHeroVisible] = useState(false);
   const [visible, setVisible] = useState({});
+  const [searchError, setSearchError] = useState("");
   const refs = useRef({});
+  const inputRef = useRef(null);
+
+  const [typedText, setTypedText] = useState("");
+  const [isFocused, setIsFocused] = useState(false);
+  const phraseIdx = useRef(0);
+  const charIdx = useRef(0);
+  const isDeleting = useRef(false);
+  const pauseRef = useRef(false);
+
+  // ── Auth state ────────────────────────────────────────────────────
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [pendingAction, setPendingAction] = useState(null);
+
+  const navigate = useNavigate();
+
+  // Keep isLoggedIn in sync with Firebase
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (user) => {
+      setIsLoggedIn(!!user);
+    });
+    return unsub;
+  }, []);
+
+  /**
+   * guardedAction — runs `action` immediately if logged in,
+   * otherwise opens LoginModal and replays `action` after login.
+   */
+  const guardedAction = (action) => {
+    if (isLoggedIn) {
+      action();
+    } else {
+      setPendingAction(() => action);
+      setShowLoginModal(true);
+    }
+  };
+
+  /**
+   * saveSearchHistory — if logged in, records the query in Firestore.
+   * Guests search freely and nothing is stored.
+   */
+  const saveSearchHistory = async (query) => {
+    const user = auth.currentUser;
+    if (!user) return;
+    try {
+      await addDoc(collection(db, "users", user.uid, "searchHistory"), {
+        query,
+        searchedAt: serverTimestamp(),
+      });
+    } catch (e) {
+      console.error("Failed to save search history:", e);
+    }
+  };
+
+  const handleModalClose = () => {
+    setShowLoginModal(false);
+    if (pendingAction && auth.currentUser) pendingAction();
+    setPendingAction(null);
+  };
+
+  // ── Search ────────────────────────────────────────────────────────
+  const handleSearch = () => {
+    if (!query.trim()) {
+      setSearchError("Please ask something or search your home");
+      if (inputRef.current) inputRef.current.focus();
+      setTimeout(() => setSearchError(""), 3000);
+      return;
+    }
+    const q = query.trim();
+    setSearchError("");
+    saveSearchHistory(q);
+    navigate(`/search?q=${encodeURIComponent(q)}`);
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter") handleSearch();
+  };
+
+  // ── Plus button ───────────────────────────────────────────────────
+  const handlePlusClick = () => {
+    guardedAction(() => {
+      // TODO: open post / add listing flow
+      navigate("/list-property");
+    });
+  };
+
+  // ── Typing animation ──────────────────────────────────────────────
+  useEffect(() => {
+    if (query || isFocused) { setTypedText(""); return; }
+
+    const tick = () => {
+      const current = placeholderPhrases[phraseIdx.current];
+      if (pauseRef.current) return;
+
+      if (!isDeleting.current) {
+        charIdx.current++;
+        setTypedText(current.slice(0, charIdx.current));
+        if (charIdx.current === current.length) {
+          pauseRef.current = true;
+          setTimeout(() => { pauseRef.current = false; isDeleting.current = true; }, 1800);
+        }
+      } else {
+        charIdx.current--;
+        setTypedText(current.slice(0, charIdx.current));
+        if (charIdx.current === 0) {
+          isDeleting.current = false;
+          phraseIdx.current = (phraseIdx.current + 1) % placeholderPhrases.length;
+        }
+      }
+    };
+
+    const speed = isDeleting.current ? 35 : 65;
+    const timer = setInterval(tick, speed);
+    return () => clearInterval(timer);
+  }, [query, isFocused, typedText]);
 
   useEffect(() => {
     const t = setTimeout(() => setHeroVisible(true), 100);
@@ -142,10 +269,10 @@ export default function Home() {
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: 'Raleway', sans-serif; background: #fff; overflow-x: hidden; }
 
-        /* HERO */
         .hero-page {
-          position: relative; min-height: 100vh;
-          display: flex; flex-direction: column; align-items: center; overflow: hidden;
+          position: relative; min-height: 100vh; min-height: 100dvh;
+          display: flex; flex-direction: column; align-items: center;
+          justify-content: center; overflow: hidden;
         }
         .hero-page::before {
           content: ''; position: absolute; inset: 0;
@@ -159,7 +286,6 @@ export default function Home() {
           opacity: 0.55; z-index: 1;
         }
 
-        /* skyline */
         .bg-skyline-wrap {
           position: absolute; bottom: 0; left: 0;
           width: 100%; height: 70%;
@@ -184,7 +310,7 @@ export default function Home() {
         .hero-content {
           position: relative; z-index: 10;
           display: flex; flex-direction: column; align-items: center;
-          text-align: center; padding: 140px 24px 80px;
+          text-align: center; padding: 120px 24px 60px;
           width: 100%; max-width: 860px; margin: 0 auto;
         }
 
@@ -199,39 +325,107 @@ export default function Home() {
           box-shadow: 0 2px 12px rgba(26,143,209,.35);
           transition: opacity .6s ease .1s, transform .6s ease .1s;
         }
+
         .hero-title {
-          font-size: clamp(42px,7vw,72px); font-weight: 800; line-height: 1.08;
+          font-size: clamp(36px,7vw,72px); font-weight: 800;
+          line-height: 1.0;
           color: #0b3a5e; letter-spacing: -1px; font-family: 'Raleway', sans-serif;
+          margin-bottom: 0;
           transition: opacity .6s ease .25s, transform .6s ease .25s;
         }
         .hero-title-italic {
-          font-size: clamp(42px,7vw,72px); font-weight: 800; font-style: italic;
-          line-height: 1.08; color: #0b3a5e; letter-spacing: -1px;
-          margin-bottom: 18px; display: block; font-family: 'Raleway', sans-serif;
+          font-size: clamp(36px,7vw,72px); font-weight: 800; font-style: italic;
+          line-height: 1.0;
+          color: #0b3a5e; letter-spacing: -1px;
+          margin-bottom: 14px;
+          display: block; font-family: 'Raleway', sans-serif;
           transition: opacity .6s ease .35s, transform .6s ease .35s;
         }
+
         .hero-sub {
-          font-size: 16px; font-weight: 500; color: #3a6880; margin-bottom: 32px;
+          font-size: 16px; font-weight: 500; color: #3a6880; margin-bottom: 28px;
           font-family: 'Inter', sans-serif;
           transition: opacity .6s ease .45s, transform .6s ease .45s;
         }
         .search-card {
           width: 100%; max-width: 750px; background: #fff; border-radius: 18px;
-          padding: 14px 16px; box-shadow: 0 8px 32px rgba(10,60,100,.13); margin-bottom: 44px;
+          padding: 14px 16px; box-shadow: 0 8px 32px rgba(10,60,100,.13); margin-bottom: 12px;
           transition: opacity .6s ease .55s, transform .6s ease .55s;
+        }
+        .search-card.has-error {
+          box-shadow: 0 8px 32px rgba(10,60,100,.13), 0 0 0 2px #ef4444;
         }
         .search-input-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
         .search-input {
-          flex: 1; border: none; outline: none; font-size: 15px; font-weight: 500;
+          border: none; outline: none; font-size: 15px; font-weight: 500;
           color: #0b3a5e; font-family: 'Inter', sans-serif; background: transparent;
         }
         .search-input::placeholder { color: #9ab5c7; }
-        .search-sparkle { color: #1a8fd1; font-size: 18px; flex-shrink: 0; }
+
+        .search-input-wrap {
+          flex: 1; position: relative; min-width: 0; overflow: hidden;
+        }
+        .search-input-wrap .search-input {
+          width: 100%; display: block; position: relative; z-index: 2; background: transparent;
+          padding: 6px 0;
+        }
+        .typing-placeholder {
+          position: absolute; left: 0; top: 0; bottom: 0;
+          right: 0;
+          display: flex; align-items: center;
+          font-size: 15px; font-weight: 500; color: #9ab5c7;
+          font-family: 'Inter', sans-serif;
+          pointer-events: none; z-index: 1;
+          white-space: nowrap;
+          overflow: hidden; text-overflow: ellipsis;
+          padding: 6px 0;
+        }
+        .typing-cursor {
+          font-weight: 300; color: #1a8fd1;
+          animation: cursorBlink 1s steps(1) infinite;
+          margin-left: 1px;
+        }
+        @keyframes cursorBlink {
+          0%, 50% { opacity: 1; }
+          51%, 100% { opacity: 0; }
+        }
+
+        .search-error-msg {
+          font-size: 13px; color: #ef4444; font-weight: 500;
+          font-family: 'Inter', sans-serif;
+          margin-bottom: 24px; min-height: 20px;
+          display: flex; align-items: center; gap: 6px;
+          animation: errorSlide 0.3s ease;
+        }
+        .search-error-msg svg { flex-shrink: 0; }
+        @keyframes errorSlide {
+          0% { opacity: 0; transform: translateY(-6px); }
+          100% { opacity: 1; transform: translateY(0); }
+        }
+
+        .search-sparkle { color: #1a8fd1; font-size: 18px; flex-shrink: 0; display: inline-block; animation: sparkleRotate 4s ease-in-out infinite; }
+        @keyframes sparkleRotate {
+          0%   { transform: rotate(0deg); }
+          25%  { transform: rotate(360deg); }
+          100% { transform: rotate(360deg); }
+        }
         .search-btn {
           background: #1a8fd1; color: #fff; border: none; border-radius: 10px;
           padding: 9px 20px; font-size: 14px; font-weight: 700; cursor: pointer;
           font-family: 'Raleway', sans-serif; flex-shrink: 0;
+          position: relative; overflow: hidden;
           transition: background .18s, transform .15s;
+        }
+        .search-btn::before {
+          content: ''; position: absolute; top: 0; left: -100%; width: 120px; height: 100%;
+          background: linear-gradient(120deg,transparent 0%,rgba(255,255,255,.1) 40%,rgba(255,255,255,.45) 50%,rgba(255,255,255,.1) 60%,transparent 100%);
+          transform: skewX(-20deg);
+          animation: searchShimmer 2.5s ease-in-out infinite;
+        }
+        @keyframes searchShimmer {
+          0% { left: -100%; }
+          60% { left: 150%; }
+          100% { left: 150%; }
         }
         .search-btn:hover { background: #0e78b5; transform: translateY(-1px); }
         .plus-btn {
@@ -247,7 +441,7 @@ export default function Home() {
           transition: opacity .6s ease .7s, transform .6s ease .7s;
         }
         .feature-pill {
-          background: #0B8BE0B2; color: #fff; font-size: 14px; font-weight: 600; opacity: 70%,
+          background: rgba(11,139,224,0.7); color: #fff; font-size: 14px; font-weight: 600;
           font-family: 'Raleway', sans-serif; padding: 12px 24px; border-radius: 50px;
           border: none; outline: none; cursor: pointer; white-space: nowrap;
           position: relative; overflow: hidden;
@@ -262,9 +456,8 @@ export default function Home() {
         .feature-pill:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(11,139,224,.35); }
         @keyframes shine { 0%{left:-100%} 100%{left:150%} }
 
-        /* SECTION 2 */
-        .tp-section { background: #fff; padding: 90px 24px; }
-        .tp-inner { max-width: 1100px; margin: 0 auto; }
+        .tp-section { background: #fff; padding: 80px 24px; min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; }
+        .tp-inner { max-width: 1100px; margin: 0 auto; width: 100%; }
         .tp-badge {
           display: inline-block; background: #e8faf4; color: #00c27a;
           font-size: 11px; font-weight: 700; font-family: 'Raleway', sans-serif;
@@ -272,7 +465,7 @@ export default function Home() {
           letter-spacing: .5px; text-transform: uppercase;
         }
         .tp-title {
-          font-size: clamp(34px,5vw,52px); font-weight: 800; color: #0b1f2e;
+          font-size: clamp(30px,5vw,52px); font-weight: 800; color: #0b1f2e;
           line-height: 1.1; margin-bottom: 4px; letter-spacing: -1px;
           font-family: 'Raleway', sans-serif;
         }
@@ -305,7 +498,7 @@ export default function Home() {
           text-align: left;
         }
         .tp-card-desc {
-          font-size: 13.5px; color: #7a97aa; line-height: 1.6;
+          font-size: 13.5px; color: #4a6d7f; line-height: 1.6;
           margin: 0; font-family: 'Inter', sans-serif; text-align: left;
         }
         .tp-btn-blue, .tp-btn-dark {
@@ -326,12 +519,15 @@ export default function Home() {
         .tp-btn-blue:hover { background: #0e78b5; transform: translateY(-1px); box-shadow: 0 6px 20px rgba(26,143,209,.3); }
         .tp-btn-dark:hover { background: #005538; transform: translateY(-1px); box-shadow: 0 0 16px rgba(0,108,71,.4); }
 
-        /* SECTION 3 */
-        .ll-section { background: #f8fbfd; padding: 90px 24px; }
+        .ll-section { background: #f8fbfd; padding: 80px 24px; min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; }
+        .ll-outer { max-width: 1100px; margin: 0 auto; width: 100%; }
+        .ll-heading-row { width: 100%; margin-bottom: 40px; }
         .ll-inner {
-          max-width: 1100px; margin: 0 auto;
-          display: grid; grid-template-columns: 1fr 1fr; gap: 60px; align-items: start;
+          max-width: 1100px; margin: 0 auto; width: 100%;
+          display: grid; grid-template-columns: 1fr 1fr; gap: 48px;
+          align-items: start;
         }
+        .ll-left { display: flex; flex-direction: column; align-items: flex-start; }
         .ll-badge {
           display: inline-block; background: #e8f4fb; color: #1a8fd1;
           font-size: 11px; font-weight: 700; font-family: 'Raleway', sans-serif;
@@ -339,21 +535,17 @@ export default function Home() {
           letter-spacing: .5px; text-transform: uppercase;
         }
         .ll-title {
-          font-size: clamp(30px,4.5vw,50px); font-weight: 800; color: #0b1f2e;
+          font-size: clamp(28px,4.5vw,50px); font-weight: 800; color: #0b1f2e;
           line-height: 1.1; letter-spacing: -1px; margin: 0 0 4px;
           font-family: 'Raleway', sans-serif; text-align: left;
         }
         .ll-title-blue {
-          font-size: clamp(30px,4.5vw,50px); font-weight: 800; font-style: italic;
+          font-size: clamp(28px,4.5vw,50px); font-weight: 800; font-style: italic;
           color: #1a8fd1; line-height: 1.1; letter-spacing: -1px;
-          margin: 0 0 32px; display: block;
+          margin: 0 0 0; display: block;
           font-family: 'Raleway', sans-serif; text-align: left;
         }
-        .ll-content-needed {
-          font-size: 13px; color: #b0c8d6; font-weight: 500;
-          margin-bottom: 32px; font-family: 'Inter', sans-serif; text-align: left;
-        }
-        .ll-features-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 28px 24px; }
+        .ll-features-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px 20px; }
         .ll-feature-item {
           display: flex; flex-direction: column; align-items: flex-start; gap: 5px;
           opacity: 0; transform: translateY(20px);
@@ -370,11 +562,10 @@ export default function Home() {
           font-family: 'Raleway', sans-serif; text-align: left;
         }
         .ll-feature-desc {
-          font-size: 12.5px; color: #9ab5c7; line-height: 1.5; margin: 0;
+          font-size: 13.5px; color: #4a6d7f; line-height: 1.55; margin: 0;
           font-family: 'Inter', sans-serif; text-align: left;
         }
 
-        /* steps */
         .ll-right { display: flex; flex-direction: column; gap: 20px; }
         .ll-how-title {
           font-size: 20px; font-weight: 800; color: #0b1f2e;
@@ -403,7 +594,7 @@ export default function Home() {
           font-family: 'Raleway', sans-serif; text-align: left;
         }
         .ll-step-desc {
-          font-size: 12.5px; color: #9ab5c7; margin: 0; line-height: 1.5;
+          font-size: 13.5px; color: #4a6d7f; margin: 0; line-height: 1.55;
           font-family: 'Inter', sans-serif; text-align: left;
         }
         .ll-btn {
@@ -422,13 +613,12 @@ export default function Home() {
         .ll-btn:hover::before { animation: shine 1.2s ease forwards; }
         .ll-btn:hover { background: #0e78b5; transform: translateY(-1px); box-shadow: 0 6px 20px rgba(26,143,209,.3); }
         .ll-trust { font-size: 11.5px; color: #b0c8d6; text-align: center; margin: 0; font-family: 'Inter', sans-serif; }
-        .ll-pricing-card { background: #e8f4fb; border-radius: 16px; padding: 18px 20px; display: flex; align-items: flex-start; gap: 14px; }
+        .ll-pricing-card { background: #e8f4fb; border-radius: 16px; padding: 18px 20px; display: flex; align-items: flex-start; gap: 14px; margin-top: 12px; }
         .ll-pricing-icon { width: 40px; height: 40px; background: #1a8fd1; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
         .ll-pricing-title { font-size: 14px; font-weight: 700; color: #0b3a5e; margin: 0 0 4px; font-family: 'Raleway', sans-serif; text-align: left; }
-        .ll-pricing-desc  { font-size: 12.5px; color: #5a8aaa; margin: 0; line-height: 1.5; font-family: 'Inter', sans-serif; text-align: left; }
+        .ll-pricing-desc  { font-size: 13.5px; color: #4a6d7f; margin: 0; line-height: 1.55; font-family: 'Inter', sans-serif; text-align: left; }
 
-        /* SECTION 4 */
-        .ag-section { background: #fff; padding: 90px 24px 0; position: relative; overflow: hidden; }
+        .ag-section { background: #fff; padding: 80px 24px 0; position: relative; overflow: hidden; min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; justify-content: center; }
         .ag-glow-orb {
           position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%);
           width: 900px; height: 420px;
@@ -440,7 +630,7 @@ export default function Home() {
           0%,100% { opacity:.75; transform:translateX(-50%) scale(1); }
           50%      { opacity:1;   transform:translateX(-50%) scale(1.1); }
         }
-        .ag-inner { max-width: 1100px; margin: 0 auto; position: relative; z-index: 1; }
+        .ag-inner { max-width: 1100px; margin: 0 auto; position: relative; z-index: 1; width: 100%; }
         .ag-badge {
           display: inline-block; background: #fff4e8; color: #f07b2a;
           font-size: 11px; font-weight: 700; font-family: 'Raleway', sans-serif;
@@ -448,12 +638,12 @@ export default function Home() {
           letter-spacing: .5px; text-transform: uppercase;
         }
         .ag-title {
-          font-size: clamp(28px,4vw,46px); font-weight: 800; color: #0b1f2e;
+          font-size: clamp(26px,4vw,46px); font-weight: 800; color: #0b1f2e;
           line-height: 1.1; letter-spacing: -1px; margin: 0 0 4px;
           font-family: 'Raleway', sans-serif; text-align: left;
         }
         .ag-title-blue {
-          font-size: clamp(26px,3.8vw,42px); font-weight: 800; font-style: italic;
+          font-size: clamp(24px,3.8vw,42px); font-weight: 800; font-style: italic;
           color: #1a8fd1; line-height: 1.15; letter-spacing: -1px;
           margin: 0 0 48px; display: block;
           font-family: 'Raleway', sans-serif; text-align: left;
@@ -476,7 +666,7 @@ export default function Home() {
           font-family: 'Raleway', sans-serif; text-align: left;
         }
         .ag-card-desc {
-          font-size: 12.5px; color: #9ab5c7; line-height: 1.55; margin: 0;
+          font-size: 13.5px; color: #4a6d7f; line-height: 1.55; margin: 0;
           font-family: 'Inter', sans-serif; text-align: left;
         }
         .ag-cta-wrap { display: flex; justify-content: center; margin-bottom: 90px; position: relative; z-index: 2; }
@@ -501,11 +691,10 @@ export default function Home() {
           50%      { box-shadow: 0 4px 40px rgba(26,143,209,.7),0 0 70px rgba(26,143,209,.28); }
         }
 
-        /* FOOTER */
         .site-footer {
           background: #fff; border-top: 1px solid #e8eef3;
           padding: 24px 32px; display: flex; align-items: center; justify-content: space-between;
-          position: relative; z-index: 1;
+          position: relative; z-index: 1; margin-top: auto;
         }
         .footer-copy { font-size: 11.5px; color: #b0c8d6; font-weight: 500; text-transform: uppercase; letter-spacing: .3px; font-family: 'Inter', sans-serif; }
         .footer-links { display: flex; gap: 28px; }
@@ -515,24 +704,85 @@ export default function Home() {
         .reveal { opacity: 0; transform: translateY(28px); transition: opacity .6s ease, transform .6s ease; }
         .reveal.v { opacity: 1; transform: translateY(0); }
 
-        @media (max-width: 780px) { .ll-inner { grid-template-columns: 1fr; gap: 48px; } .ll-section { padding: 60px 18px; } }
+        @media (max-width: 1024px) {
+          .hero-content { padding: 110px 20px 50px; }
+          .tp-section { padding: 60px 20px; }
+          .ll-inner { gap: 40px; }
+          .ag-grid { gap: 12px; }
+          .ag-grid-bottom { gap: 12px; }
+        }
+        @media (max-width: 780px) {
+          .ll-inner { grid-template-columns: 1fr; gap: 40px; }
+          .ll-section { padding: 60px 20px; }
+          .tp-cards { gap: 20px; }
+          .ag-section { padding: 60px 20px 0; }
+        }
         @media (max-width: 680px) {
-          .tp-cards { grid-template-columns: 1fr; } .tp-section { padding: 60px 18px; }
-          .ag-grid { grid-template-columns: 1fr; } .ag-grid-bottom { grid-template-columns: 1fr; }
-          .ag-section { padding: 60px 18px 0; } .hero-content { padding: 120px 18px 60px; }
-          .feature-pill { font-size: 13px; padding: 10px 18px; }
+          .tp-cards { grid-template-columns: 1fr; }
+          .tp-section { padding: 50px 16px; min-height: auto; }
+          .ag-grid { grid-template-columns: 1fr; }
+          .ag-grid-bottom { grid-template-columns: 1fr; max-width: 100%; }
+          .ag-section { padding: 50px 16px 0; min-height: auto; }
+          .hero-content { padding: 100px 16px 40px; }
+          .hero-title { font-size: clamp(32px,10vw,48px); }
+          .hero-title-italic { font-size: clamp(32px,10vw,48px); }
+          .hero-sub { font-size: 14px; margin-bottom: 20px; }
+          .hero-badge { font-size: 11px; padding: 6px 16px; margin-bottom: 20px; }
+          .feature-pill { font-size: 12px; padding: 10px 16px; }
+          .feature-pills-grid { gap: 8px; }
+          .search-card { padding: 12px 14px; margin-bottom: 8px; }
+          .search-btn { padding: 8px 16px; font-size: 13px; }
+          .bg-skyline-wrap { height: 92%; opacity: 0.32; }
+          .ll-section { padding: 50px 16px; min-height: auto; }
+          .ll-features-grid { gap: 20px 16px; }
         }
         @media (max-width: 520px) {
-          .site-footer { flex-direction: column; gap: 16px; text-align: center; }
+          .site-footer { flex-direction: column; gap: 16px; text-align: center; padding: 20px 16px; }
           .footer-links { flex-wrap: wrap; justify-content: center; gap: 16px; }
           .ll-features-grid { grid-template-columns: 1fr; }
+          .hero-content { padding: 90px 14px 32px; }
+          .hero-title { font-size: clamp(28px,9vw,40px); }
+          .hero-title-italic { font-size: clamp(28px,9vw,40px); margin-bottom: 10px; }
+          .hero-sub { font-size: 13px; }
+          .hero-badge { font-size: 10.5px; padding: 5px 14px; }
+          .search-card { border-radius: 14px; padding: 10px 12px; margin-bottom: 6px; }
+          .search-input { font-size: 13px; }
+          .typing-placeholder { font-size: 13px; }
+          .search-btn { padding: 7px 14px; font-size: 12px; }
+          .plus-btn { width: 28px; height: 28px; font-size: 18px; }
+          .feature-pill { font-size: 11px; padding: 8px 14px; }
+          .feature-pills-grid { gap: 6px; }
+          .bg-skyline-wrap { height: 95%; opacity: 0.38; }
+          .tp-title { font-size: clamp(26px,7vw,36px); }
+          .tp-section { padding: 40px 14px; }
+          .tp-card { padding: 20px; gap: 16px; }
+          .tp-card-title { font-size: 18px; }
+          .ll-title { font-size: clamp(24px,7vw,36px); }
+          .ll-title-blue { font-size: clamp(24px,7vw,36px); }
+          .ll-section { padding: 40px 14px; }
+          .ag-title { font-size: clamp(22px,6vw,34px); }
+          .ag-title-blue { font-size: clamp(20px,5.5vw,30px); margin-bottom: 28px; }
+          .ag-section { padding: 40px 14px 0; }
+          .ag-card { padding: 16px; }
+          .ag-cta-wrap { margin-bottom: 60px; }
+          .ag-btn { padding: 14px 28px; font-size: 14px; }
+        }
+        @media (max-width: 360px) {
+          .hero-content { padding: 80px 12px 28px; }
+          .hero-title { font-size: 26px; }
+          .hero-title-italic { font-size: 26px; }
+          .feature-pill { font-size: 10.5px; padding: 7px 12px; }
+          .tp-card { padding: 16px; }
         }
       `}</style>
+
+      {/* ── LoginModal — single instance, controlled by guardedAction ── */}
+      <LoginModal isOpen={showLoginModal} onClose={handleModalClose} />
 
       <NavBar />
 
       {/* HERO */}
-      <div className="hero-page">
+      <div className="hero-page" id="tenants">
         <div className="bg-clouds" />
         <div className="bg-skyline-wrap">
           <div className="bg-skyline-track">
@@ -599,14 +849,47 @@ export default function Home() {
           <h1 className={`hero-title anim${heroVisible?" v":""}`}>Find Your Home</h1>
           <span className={`hero-title-italic anim${heroVisible?" v":""}`}>Through Conversation</span>
           <p className={`hero-sub anim${heroVisible?" v":""}`}>Listing Your Rental Property is Fast and Easy with AI</p>
-          <div className={`search-card anim${heroVisible?" v":""}`}>
+
+          <div className={`search-card anim${heroVisible?" v":""}${searchError?" has-error":""}`}>
             <div className="search-input-row">
-              <input className="search-input" placeholder="Ask Anything" value={query} onChange={(e)=>setQuery(e.target.value)}/>
+              <div className="search-input-wrap">
+                <input
+                  ref={inputRef}
+                  className="search-input"
+                  placeholder=""
+                  value={query}
+                  onChange={(e) => { setQuery(e.target.value); if (searchError) setSearchError(""); }}
+                  onFocus={() => setIsFocused(true)}
+                  onBlur={() => setIsFocused(false)}
+                  onKeyDown={handleKeyDown}
+                />
+                {!query && !isFocused && !searchError && (
+                  <span className="typing-placeholder">
+                    {typedText}
+                    <span className="typing-cursor">|</span>
+                  </span>
+                )}
+                {!query && !isFocused && searchError && (
+                  <span className="typing-placeholder" style={{ color: "#ef4444" }}>
+                    Please ask something or search your home
+                  </span>
+                )}
+              </div>
               <span className="search-sparkle">&#10022;</span>
-              <button className="search-btn">Search</button>
+              {/* ── auth-guarded Search ── */}
+              <button className="search-btn" onClick={handleSearch}>Search</button>
             </div>
-            <button className="plus-btn">+</button>
+            {/* ── auth-guarded + button ── */}
+            <button className="plus-btn" onClick={handlePlusClick}>+</button>
           </div>
+
+          <div className="search-error-msg" style={{ visibility: searchError ? "visible" : "hidden" }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+            {searchError}
+          </div>
+
           <div className={`feature-pills-grid anim${heroVisible?" v":""}`}>
             {featurePills.map((pill)=>(
               <button key={pill} className="feature-pill">{pill}</button>
@@ -638,7 +921,10 @@ export default function Home() {
                 <p className="tp-card-desc">Cut out the middleman and deal directly with homeowners verified by our AI.</p>
               </div>
               <FeatureList items={directOwnerFeatures}/>
-              <button className="tp-btn-blue">Explore Direct Listings &#8594;</button>
+              {/* ── auth-guarded ── */}
+              <button className="tp-btn-blue" onClick={() => guardedAction(() => navigate("/search?type=direct"))}>
+                Explore Direct Listings &#8594;
+              </button>
             </div>
 
             <div ref={rf("tc2")} data-key="tc2" className={`tp-card${visible["tc2"]?" v":""}`} style={{transition:"opacity .6s ease .22s,transform .6s ease .22s,box-shadow .25s"}}>
@@ -655,64 +941,70 @@ export default function Home() {
                 <p className="tp-card-desc">Full-service assistance from premium, background-checked property consultants.</p>
               </div>
               <FeatureList items={brokerFeatures}/>
-              <button className="tp-btn-dark">Connect with Brokers</button>
+              {/* ── auth-guarded ── */}
+              <button className="tp-btn-dark" onClick={() => guardedAction(() => navigate("/search?type=broker"))}>
+                Connect with Brokers
+              </button>
             </div>
           </div>
         </div>
       </section>
 
       {/* SECTION 3 */}
-      <section className="ll-section">
-        <div className="ll-inner">
-          <div>
-            <div ref={rf("llh")} data-key="llh" className={`reveal${visible["llh"]?" v":""}`} style={{textAlign:"left"}}>
-              <span className="ll-badge">For Landlords</span>
-              <h2 className="ll-title">List your property.</h2>
-              <span className="ll-title-blue">Reach thousands.</span>
-              <p className="ll-content-needed">Content Needed</p>
-            </div>
-            <div className="ll-features-grid">
-              {landlordFeatures.map((f,i)=>(
-                <div key={i} ref={rf(`llf${i}`)} data-key={`llf${i}`} className={`ll-feature-item${visible[`llf${i}`]?" v":""}`} style={{transitionDelay:`${i*.08}s`}}>
-                  <div className="ll-feat-icon">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1a8fd1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-                    </svg>
-                  </div>
-                  <p className="ll-feature-title">{f.title}</p>
-                  <p className="ll-feature-desc">{f.desc}</p>
-                </div>
-              ))}
-            </div>
+      <section className="ll-section" id="landlords">
+        <div className="ll-outer">
+          <div ref={rf("llh")} data-key="llh" className={`ll-heading-row reveal${visible["llh"]?" v":""}`} style={{textAlign:"left"}}>
+            <span className="ll-badge">For Landlords</span>
+            <h2 className="ll-title">List your property.</h2>
+            <span className="ll-title-blue">Reach thousands.</span>
           </div>
-
-          <div ref={rf("llr")} data-key="llr" className={`ll-right reveal${visible["llr"]?" v":""}`} style={{transitionDelay:"0.2s"}}>
-            <h3 className="ll-how-title">How to List Your Property</h3>
-            <div className="ll-steps">
-              {listingSteps.map((s)=>(
-                <div key={s.num} className="ll-step">
-                  <div className="ll-step-col">
-                    <div className={`ll-step-num${s.active?"":" outline"}`}>{s.num}</div>
-                    <div className="ll-step-line"/>
+          <div className="ll-inner">
+            <div className="ll-left">
+              <div className="ll-features-grid">
+                {landlordFeatures.map((f,i)=>(
+                  <div key={i} ref={rf(`llf${i}`)} data-key={`llf${i}`} className={`ll-feature-item${visible[`llf${i}`]?" v":""}`} style={{transitionDelay:`${i*.08}s`}}>
+                    <div className="ll-feat-icon">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1a8fd1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                      </svg>
+                    </div>
+                    <p className="ll-feature-title">{f.title}</p>
+                    <p className="ll-feature-desc">{f.desc}</p>
                   </div>
-                  <div className="ll-step-body">
-                    <p className="ll-step-title">{s.title}</p>
-                    <p className="ll-step-desc">{s.desc}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <button className="ll-btn">List Your Property &#8594;</button>
-            <p className="ll-trust">Trusted by leading asset managers across the country</p>
-            <div className="ll-pricing-card">
-              <div className="ll-pricing-icon">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
-                </svg>
+                ))}
               </div>
-              <div>
-                <p className="ll-pricing-title">Smart Pricing Assist</p>
-                <p className="ll-pricing-desc">AI analyzes 4M+ data points to suggest the optimal rent for your area.</p>
+            </div>
+            <div className="ll-right">
+              <h3 className="ll-how-title">How to List Your Property</h3>
+              <div className="ll-steps">
+                {listingSteps.map((s)=>(
+                  <div key={s.num} className="ll-step">
+                    <div className="ll-step-col">
+                      <div className={`ll-step-num${s.active?"":" outline"}`}>{s.num}</div>
+                      <div className="ll-step-line"/>
+                    </div>
+                    <div className="ll-step-body">
+                      <p className="ll-step-title">{s.title}</p>
+                      <p className="ll-step-desc">{s.desc}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {/* ── auth-guarded ── */}
+              <button className="ll-btn" onClick={() => guardedAction(() => navigate("/list-property"))}>
+                List Your Property &#8594;
+              </button>
+              <p className="ll-trust">Trusted by leading asset managers across the country</p>
+              <div className="ll-pricing-card">
+                <div className="ll-pricing-icon">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                  </svg>
+                </div>
+                <div>
+                  <p className="ll-pricing-title">Smart Pricing Assist</p>
+                  <p className="ll-pricing-desc">AI analyzes 4M+ data points to suggest the optimal rent for your area.</p>
+                </div>
               </div>
             </div>
           </div>
@@ -720,7 +1012,7 @@ export default function Home() {
       </section>
 
       {/* SECTION 4 */}
-      <section className="ag-section">
+      <section className="ag-section" id="agents">
         <div className="ag-glow-orb"/>
         <div className="ag-inner">
           <div ref={rf("agh")} data-key="agh" className={`reveal${visible["agh"]?" v":""}`} style={{textAlign:"left"}}>
@@ -745,7 +1037,10 @@ export default function Home() {
             ))}
           </div>
           <div className="ag-cta-wrap">
-            <button className="ag-btn">Registered As a Rera Broker &#8594;</button>
+            {/* ── auth-guarded ── */}
+            <button className="ag-btn" onClick={() => guardedAction(() => navigate("/list-property"))}>
+              Registered As a Rera Broker &#8594;
+            </button>
           </div>
         </div>
         <footer className="site-footer">
